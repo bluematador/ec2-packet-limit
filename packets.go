@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -21,6 +24,7 @@ const THREAD_MULTIPLE = 1
 const PACKET_SIZE = 1
 const SEND_LOOP = 10000
 var iface string
+var filename string
 
 func run(shutdownChannel chan struct{}) {
 	conn, err := net.Dial("udp", "172.31.155.155:1000")
@@ -68,10 +72,10 @@ func getPackets() (int, error) {
 }
 
 type aggregatedRate struct {
-	min int
-	max int
-	sum int
-	num int
+	Min int
+	Max int
+	Sum int
+	Num int
 }
 
 func calc(shutdownChannel chan struct{}) {
@@ -134,6 +138,10 @@ func calc(shutdownChannel chan struct{}) {
 				aggRates[aggRatesIndex] = aggregatedRate{minuteMin, minuteMax, minuteSum, minuteNum}
 				fmt.Println(aggRatesIndex, aggRates[aggRatesIndex])
 				aggRatesIndex += 1
+
+				if aggRatesIndex % 30 == 0 {
+					saveFile(rates, aggRates)
+				}
 			}
 
 			if ratesIndex > len(rates) {
@@ -142,7 +150,30 @@ func calc(shutdownChannel chan struct{}) {
 		}
 	}
 
-	fmt.Println("save data to files")
+	saveFile(rates, aggRates)
+}
+
+func saveFile(rates []int, aggRates []aggregatedRate) {
+	fmt.Println("Saving data to", filename)
+
+	output := map[string]interface{} {
+		"aggregate": aggRates,
+		"individual": rates,
+	}
+	jsonBytes, _ := json.Marshal(output)
+
+	var gzBytes bytes.Buffer
+	zipper := gzip.NewWriter(&gzBytes)
+	if _, err := zipper.Write([]byte(string(jsonBytes))); err != nil {
+		fmt.Println("Cannot write gzip", err)
+		return
+	}
+	zipper.Close()
+
+	if err := ioutil.WriteFile(filename, gzBytes.Bytes(), 0644); err != nil {
+		fmt.Println("Cannot write file", err)
+		return
+	}
 }
 
 func goWaitGroup(group *sync.WaitGroup, callback func()) {
@@ -184,6 +215,8 @@ func handleShutdownSignals(shutdownChannel chan struct{}) {
 }
 
 func main() {
+	filename = time.Now().Format("20060102_150405") + ".json.gz"
+
 	shutdownChannel := make(chan struct{})
 	go handleShutdownSignals(shutdownChannel)
 
