@@ -22,9 +22,9 @@ const POLL = time.Second
 const AGGPOLL = time.Minute
 const THREAD_MULTIPLE = 1
 const PACKET_SIZE = 1
-const SEND_LOOP = 10000
 var iface string
 var filename string
+var sendLoop int
 
 func run(shutdownChannel chan struct{}) {
 	conn, err := net.Dial("udp", "172.31.155.155:1000")
@@ -40,7 +40,7 @@ func run(shutdownChannel chan struct{}) {
 		case <-shutdownChannel:
 			shutdown = true
 		default:
-			for i := 0; i < SEND_LOOP; i += 1 {
+			for i := 0; i < sendLoop; i += 1 {
 				conn.Write(data)
 			}
 		}
@@ -135,6 +135,8 @@ func calc(shutdownChannel chan struct{}) {
 					}
 				}
 
+				sendLoop = (minuteSum / minuteNum) / (runtime.NumCPU() * THREAD_MULTIPLE) / 2
+
 				aggRates[aggRatesIndex] = aggregatedRate{minuteMin, minuteMax, minuteSum, minuteNum}
 				fmt.Println(aggRatesIndex, aggRates[aggRatesIndex])
 				aggRatesIndex += 1
@@ -216,6 +218,7 @@ func handleShutdownSignals(shutdownChannel chan struct{}) {
 
 func main() {
 	filename = time.Now().Format("20060102_150405") + ".json.gz"
+	sendLoop = 10000
 
 	shutdownChannel := make(chan struct{})
 	go handleShutdownSignals(shutdownChannel)
