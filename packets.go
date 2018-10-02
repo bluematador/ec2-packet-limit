@@ -8,16 +8,17 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const RUNTIME = 24 * time.Hour
-const POLL = 1 * time.Second
+const POLL = time.Second
+const AGGPOLL = time.Minute
 const THREAD_MULTIPLE = 1
 var iface string
 
-func run(i int) {
-	fmt.Println("Running", i)
+func run(shutdownChannel chan bool) {
 	conn, err := net.Dial("udp", "172.31.155.155:1000")
 	if err != nil {
 		panic(err)
@@ -26,25 +27,6 @@ func run(i int) {
 
 	for {
 		conn.Write([]byte("a"))
-	}
-}
-
-func pretty(n int) string {
-	in := strconv.FormatInt(int64(n), 10)
-	out := make([]byte, len(in)+(len(in)-2+int(in[0]/'0'))/3)
-	if in[0] == '-' {
-		in, out[0] = in[1:], '-'
-	}
-
-	for i, j, k := len(in)-1, len(out)-1, 0; ; i, j = i-1, j-1 {
-		out[j] = in[i]
-		if i == 0 {
-			return string(out)
-		}
-		if k++; k == 3 {
-			j, k = j-1, 0
-			out[j] = ','
-		}
 	}
 }
 
@@ -72,47 +54,106 @@ func getPackets() (int, error) {
 	return strconv.Atoi(strings.TrimSpace(string(data)))
 }
 
-func calc() {
+type aggregatedRate struct {
+	min int
+	max int
+	sum int
+	num int
+}
+
+func calc(shutdownChannel chan bool) {
 	firstPackets := -1
-	maxPackets := -1
-	firstStart := time.Now()
+
 	var lastPackets int
 	var lastErr error
 
-	for {
-		packets, err := getPackets()
-		// if err != nil {
-		// 	panic(err)
-		// }
-		if err == nil && firstPackets < 0 {
-			firstPackets = packets
-			firstStart = time.Now()
-		} else if err == nil && lastErr == nil {
-			rate := packets - lastPackets
-			if rate > maxPackets {
-				maxPackets = rate
+	rates := make([]int, RUNTIME / POLL)
+	ratesIndex := 0
+
+	aggRates := make([]aggregatedRate, RUNTIME / AGGPOLL)
+	aggRatesIndex := 0
+
+	aggMultiple := int(AGGPOLL) / int(POLL)
+
+	rateTicker := time.Tick(POLL)
+	shutdown := false
+	for !shutdown {
+		select {
+		case <-shutdownChannel:
+			shutdown = true
+		case <-rateTicker:
+			packets, err := getPackets()
+			rate := -1
+
+			if err != nil {
+				fmt.Println("Error in stats", err)
+			} else if firstPackets < 0 {
+				firstPackets = packets
+			} else if lastErr == nil {
+				rate = packets - lastPackets
 			}
 
-			avg := int(float64(packets - firstPackets) / time.Now().Sub(firstStart).Seconds())
+			lastPackets = packets
+			lastErr = err
 
-			fmt.Println(time.Now().Format("15:04:05"), "Rate:", pretty(rate), POLL, "Avg:", pretty(avg), "1s", "Max:", pretty(maxPackets), POLL)
+			fmt.Println(rate)
+			rates[ratesIndex] = rate
+			ratesIndex += 1
+
+			if ratesIndex % aggMultiple == 0 {
+				minuteMin := -1
+				minuteMax := -1
+				minuteSum := 0
+				minuteNum := 0
+
+				for _, r := range rates[(ratesIndex - aggMultiple) : ratesIndex] {
+					if r >= 0 {
+						minuteNum += 1
+						minuteSum += r
+						if r > minuteMax {
+							minuteMax = r
+						}
+						if r < minuteMin || minuteMin < 0 {
+							minuteMin = r
+						}
+					}
+				}
+
+				aggRates[aggRatesIndex] = aggregatedRate{minuteMin, minuteMax, minuteSum, minuteNum}
+				fmt.Println(aggRates[aggRatesIndex])
+				aggRatesIndex += 1
+			}
+
+			if ratesIndex > len(rates) {
+				shutdown = true
+			}
 		}
-
-		time.Sleep(POLL)
-		lastPackets = packets
-		lastErr = err
 	}
+}
+
+func goWaitGroup(group *sync.WaitGroup, callback func()) {
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		callback()
+	}()
 }
 
 func main() {
 	iface = findInterface()
+	shutdownChannel := make(chan bool)
+	wg := &sync.WaitGroup{}
 
-	go calc()
-	for i := 0; i < runtime.NumCPU() * THREAD_MULTIPLE; i++ {
-		go run(i)
+	goWaitGroup(wg, func() {
+		calc(shutdownChannel)
+	})
+	for i := 0; i < runtime.NumCPU() * THREAD_MULTIPLE; i += 1 {
+		goWaitGroup(wg, func() {
+			run(shutdownChannel)
+		})
 	}
 
-	time.Sleep(RUNTIME)
+	wg.Wait()
 
 	fmt.Println("Done!")
 	os.Exit(0)
