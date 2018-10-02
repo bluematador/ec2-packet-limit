@@ -5,10 +5,12 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -16,17 +18,28 @@ const RUNTIME = 24 * time.Hour
 const POLL = time.Second
 const AGGPOLL = time.Minute
 const THREAD_MULTIPLE = 1
+const PACKET_SIZE = 1
+const SEND_LOOP = 10000
 var iface string
 
-func run(shutdownChannel chan bool) {
+func run(shutdownChannel chan struct{}) {
 	conn, err := net.Dial("udp", "172.31.155.155:1000")
 	if err != nil {
 		panic(err)
 	}
 	defer conn.Close()
 
-	for {
-		conn.Write([]byte("a"))
+	data := []byte(strings.Repeat("a", PACKET_SIZE))
+
+	for shutdown := false; !shutdown; {
+		select {
+		case <-shutdownChannel:
+			shutdown = true
+		default:
+			for i := 0; i < SEND_LOOP; i += 1 {
+				conn.Write(data)
+			}
+		}
 	}
 }
 
@@ -61,7 +74,7 @@ type aggregatedRate struct {
 	num int
 }
 
-func calc(shutdownChannel chan bool) {
+func calc(shutdownChannel chan struct{}) {
 	firstPackets := -1
 
 	var lastPackets int
@@ -76,8 +89,7 @@ func calc(shutdownChannel chan bool) {
 	aggMultiple := int(AGGPOLL) / int(POLL)
 
 	rateTicker := time.Tick(POLL)
-	shutdown := false
-	for !shutdown {
+	for shutdown := false; !shutdown; {
 		select {
 		case <-shutdownChannel:
 			shutdown = true
@@ -96,7 +108,7 @@ func calc(shutdownChannel chan bool) {
 			lastPackets = packets
 			lastErr = err
 
-			fmt.Println(rate)
+			fmt.Println(ratesIndex, rate)
 			rates[ratesIndex] = rate
 			ratesIndex += 1
 
@@ -120,7 +132,7 @@ func calc(shutdownChannel chan bool) {
 				}
 
 				aggRates[aggRatesIndex] = aggregatedRate{minuteMin, minuteMax, minuteSum, minuteNum}
-				fmt.Println(aggRates[aggRatesIndex])
+				fmt.Println(aggRatesIndex, aggRates[aggRatesIndex])
 				aggRatesIndex += 1
 			}
 
@@ -129,6 +141,8 @@ func calc(shutdownChannel chan bool) {
 			}
 		}
 	}
+
+	fmt.Println("save data to files")
 }
 
 func goWaitGroup(group *sync.WaitGroup, callback func()) {
@@ -139,9 +153,41 @@ func goWaitGroup(group *sync.WaitGroup, callback func()) {
 	}()
 }
 
+func handleShutdownSignals(shutdownChannel chan struct{}) {
+	signal.Reset()
+
+	first := true
+	signals := []os.Signal{os.Interrupt, syscall.SIGTERM}
+	sigchan := make(chan os.Signal, 1)
+	signal.Notify(sigchan, signals...)
+
+	for shutdown := false; !shutdown; {
+		select {
+		case _, ok := <-sigchan:
+			if !ok {
+				fmt.Println("Unexpected channel close in signal handler. Shutting Down")
+				close(shutdownChannel)
+			} else {
+				if first {
+					fmt.Println("Signal Received. Cleaning Up. Signal again to forcefully exit.")
+					first = false
+					close(shutdownChannel)
+				}
+			}
+
+		case <-shutdownChannel:
+			shutdown = true
+		}
+	}
+
+	signal.Reset()
+}
+
 func main() {
+	shutdownChannel := make(chan struct{})
+	go handleShutdownSignals(shutdownChannel)
+
 	iface = findInterface()
-	shutdownChannel := make(chan bool)
 	wg := &sync.WaitGroup{}
 
 	goWaitGroup(wg, func() {
