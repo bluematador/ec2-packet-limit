@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-const RUNTIME = 24 * time.Hour
+const RUNTIME = 48 * time.Hour
 const POLL = time.Second
 const AGGPOLL = time.Minute
 const THREAD_MULTIPLE = 1
