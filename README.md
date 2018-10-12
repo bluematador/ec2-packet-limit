@@ -19,9 +19,9 @@ go build packets.go
 
 ### Running the test
 
-# Copy the executable `packets` or `packets.exe` to the test system using FTP, scp, or your preferred file transfer mechanism.
-# Open a terminal on the test system
-# Run the executable: `./packets`
+1. Copy the executable `packets` or `packets.exe` to the test system using FTP, scp, or your preferred file transfer mechanism.
+1. Open a terminal on the test system
+1. Run the executable: `./packets`
 
 By default, it will run for 48 hours, but can safely be killed using `Ctrl-c` at any time without loss of data. If you do plan to run this program for an extended period of time, use `tmux`, `screen`, or another tool to prevent the login session from dying and the process being killed prematurely.
 
