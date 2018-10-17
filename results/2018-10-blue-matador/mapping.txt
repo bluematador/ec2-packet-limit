@@ -1,0 +1,16 @@
+ip-172-31-65-103.ec2.internal	c3.large
+ip-172-31-73-116.ec2.internal	m3.large
+ip-172-31-70-245.ec2.internal	c5.large
+ip-172-31-4-0.ec2.internal	t2.nano
+ip-172-31-79-186.ec2.internal	r4.large
+ip-172-31-4-206.ec2.internal	t2.micro
+ip-172-31-78-149.ec2.internal	i3.large
+ip-172-31-10-170.ec2.internal	m1.large
+ip-172-31-14-128.ec2.internal	t2.medium
+ip-172-31-78-87.ec2.internal	m4.large
+ip-172-31-75-136.ec2.internal	c4.large
+ip-172-31-3-244.ec2.internal	t2.large
+ip-172-31-77-92.ec2.internal	c1.medium
+ip-172-31-66-154.ec2.internal	r3.large
+ip-172-31-2-88.ec2.internal	t1.micro
+ip-172-31-10-66.ec2.internal	t2.small
